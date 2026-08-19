@@ -1,0 +1,60 @@
+name: Auto Unzip Uploaded ZIP
+
+on:
+  push:
+    branches: ["main", "master"]
+
+permissions:
+  contents: write
+
+jobs:
+  unzip:
+    runs-on: ubuntu-latest
+    if: ${{ !contains(github.event.head_commit.message, '[skip unzip]') }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract uploaded ZIP files
+        shell: bash
+        run: |
+          set -e
+          found=0
+          for zipfile in *.zip; do
+            [ -e "$zipfile" ] || continue
+            found=1
+            echo "Extracting $zipfile"
+            mkdir -p .unzip_tmp
+            unzip -q -o "$zipfile" -d .unzip_tmp
+
+            # If ZIP contains one top-level folder, use its contents as repo root.
+            shopt -s dotglob nullglob
+            items=(.unzip_tmp/*)
+            if [ ${#items[@]} -eq 1 ] && [ -d "${items[0]}" ]; then
+              cp -a "${items[0]}"/. .
+            else
+              cp -a .unzip_tmp/. .
+            fi
+            shopt -u dotglob nullglob
+
+            rm -rf .unzip_tmp "$zipfile"
+          done
+
+          if [ "$found" -eq 0 ]; then
+            echo "No ZIP file found. Nothing to extract."
+          fi
+
+      - name: Commit extracted files
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "Auto extract uploaded ZIP [skip unzip]"
+            git push
+          fi
